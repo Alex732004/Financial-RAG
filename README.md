@@ -1,10 +1,9 @@
 # FinAgent RAG
 
-A standalone C++20 financial-research project. The current tools fetch Apple's
-SEC submissions metadata and select up to three recent 10-K filings from saved
-metadata. They do not yet download report HTML, parse tables, or run retrieval
-or an agent.
-
+A standalone C++20 financial-research project. The tools fetch SEC submissions
+metadata, select up to three recent 10-K filings, and download their original
+HTML with a source manifest. Table parsing, retrieval, and agent orchestration
+are not implemented yet.
 
 ## Prerequisites
 
@@ -43,8 +42,8 @@ export SEC_USER_AGENT='FinAgentRAG YourName your-contact-email@example.com'
 ./build/sec_filings > data/raw/apple_submissions.json
 ```
 
-The downloader currently supports only Apple (CIK `0000320193`). It does not yet
-accept a ticker argument or download the annual report documents themselves.
+The metadata client currently supports only Apple (CIK `0000320193`). It does
+not yet accept a ticker argument. Download the report documents in step 5.
 
 The response goes to standard output; the command redirects it into the raw-data
 directory. Errors go to standard error. Only use the output if the command exits
@@ -77,6 +76,37 @@ additional filings; this parser does not fetch them automatically.
 Malformed JSON, missing or misaligned metadata, invalid dates, and unreadable
 input files cause a nonzero exit code without filing output.
 
+### 5. Download the original filing HTML
+
+First preview the SEC archive URLs and planned relative filenames without making
+requests or creating files:
+
+```sh
+./build/filing_downloader data/processed/apple_10ks.json 0000320193 data/raw/apple_10ks --dry-run
+```
+
+With your real `SEC_USER_AGENT` set, omit `--dry-run` to download the reports:
+
+```sh
+./build/filing_downloader data/processed/apple_10ks.json 0000320193 data/raw/apple_10ks
+```
+
+The output directory must be new, and its parent directory must already exist.
+Each HTML file is stored under its accession-number directory. The batch manifest
+records the CIK, filing metadata, source URLs, relative file paths, and downloaded
+count. It is saved inside the output directory and also printed to standard output.
+
+Downloads run sequentially with at least 250 ms between requests. The client
+checks HTTP status, HTML content type, nonempty content, timeouts, and file-write
+errors. It does not follow redirects or automatically retry rejected requests.
+Progress and errors go to standard error.
+
+Files are staged in a sibling directory ending in `.part` and published together
+after every download and the manifest succeed. Failed batches are cleaned up;
+existing output and staging directories are never overwritten. An incomplete
+input selection still downloads its available reports but retains
+`selectionComplete: false` in the manifest and prints a warning.
+
 ## Verification
 
 Run the offline checks after building:
@@ -85,13 +115,15 @@ Run the offline checks after building:
 ctest --test-dir build --output-on-failure
 ```
 
-Expected result: twelve passing tests. They cover missing or empty SEC identities,
-filing selection and ordering, incomplete or empty datasets, invalid JSON and
-metadata, and command-line errors. All tests are offline and use synthetic data.
+Expected result: 28 passing tests. They cover SEC identities, filing selection,
+URL construction, unsafe or malformed metadata, partial datasets, overwrite
+protection, and cleanup after failed transfers. Tests use synthetic data and a
+blocked local proxy for transfer failures; they do not contact the SEC.
 
-Live SEC access is a separate check that requires your real contact identity.
-On success, the fetch command saves Apple's submissions JSON, not the actual
-10-K annual reports.
+Live SEC access is a separate check requiring your real contact identity. The
+metadata client saves submissions JSON; the document downloader saves the annual
+report HTML. Offline tests do not verify live SEC availability or successful
+real-report downloads.
 
 ## Troubleshooting
 
@@ -100,18 +132,19 @@ On success, the fetch command saves Apple's submissions JSON, not the actual
 | CMake cannot find CURL | Install the libcurl development headers and library, then rerun configuration. |
 | The client asks for SEC_USER_AGENT | Export the variable in the same terminal used to run the client. |
 | The SEC returns HTTP 403 or 429 | Check the contact identity and SEC access policy. Avoid repeatedly retrying blocked or rate-limited requests. |
+| The document downloader rejects existing output | Choose a new output directory. Review leftover staging data before removing it yourself. |
 
 ## Next Milestone
 
-Use the selected accession numbers and document filenames to download the
-original 10-K HTML. Extend the downloader to Tesla and follow older submissions
-files when needed to collect three filings per company, preserving source
-metadata alongside them.
+Collect and inspect three 10-K HTML reports each for Apple and Tesla. Extend the
+metadata client to Tesla and follow older submissions files when necessary to
+complete the selections. Then build structure-preserving HTML parsing and chunking.
 
 ## See Also
 
 - [src/main.cpp](src/main.cpp): the initial SEC metadata client.
 - [src/filing_parser.cpp](src/filing_parser.cpp): the offline 10-K metadata selector.
+- [src/filing_downloader.cpp](src/filing_downloader.cpp): the original HTML downloader and source manifest writer.
 - [CMakeLists.txt](CMakeLists.txt): build and test configuration.
 - [tests/check_identity.cmake](tests/check_identity.cmake): offline identity checks.
 - [tests/check_filing_parser.cmake](tests/check_filing_parser.cmake): synthetic parser checks.

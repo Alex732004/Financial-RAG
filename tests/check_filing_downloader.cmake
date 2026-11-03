@@ -1,0 +1,155 @@
+if(NOT DEFINED FILING_DOWNLOADER_EXECUTABLE OR NOT DEFINED TEST_DIRECTORY)
+    message(FATAL_ERROR "FILING_DOWNLOADER_EXECUTABLE and TEST_DIRECTORY are required.")
+endif()
+
+set(selection [=[
+{
+  "requested": 3,
+  "found": 3,
+  "complete": true,
+  "filings": [
+    {"accessionNumber": "0000320193-25-000001", "filingDate": "2025-10-31", "reportDate": "2025-09-27", "primaryDocument": "annual-2025.htm"},
+    {"accessionNumber": "0000320193-24-000001", "filingDate": "2024-11-01", "reportDate": "2024-09-28", "primaryDocument": "annual-2024.htm"},
+    {"accessionNumber": "0000320193-23-000001", "filingDate": "2023-11-03", "reportDate": "2023-09-30", "primaryDocument": "annual-2023.htm"}
+  ]
+}
+]=])
+
+set(cik 0000320193)
+set(expected_count 3)
+set(expect_failure FALSE)
+set(dry_run --dry-run)
+set(identity_environment --unset=SEC_USER_AGENT)
+
+if(TEST_CASE STREQUAL "partial")
+    string(JSON selection REMOVE "${selection}" filings 2)
+    string(JSON selection REMOVE "${selection}" filings 1)
+    string(JSON selection SET "${selection}" found 1)
+    string(JSON selection SET "${selection}" complete false)
+    set(expected_count 1)
+elseif(TEST_CASE STREQUAL "empty")
+    string(JSON selection SET "${selection}" filings "[]")
+    string(JSON selection SET "${selection}" found 0)
+    string(JSON selection SET "${selection}" complete false)
+    set(expect_failure TRUE)
+elseif(TEST_CASE STREQUAL "bad_cik")
+    set(cik "../320193")
+    set(expect_failure TRUE)
+elseif(TEST_CASE STREQUAL "bad_accession")
+    string(JSON selection SET "${selection}" filings 0 accessionNumber "\"0000320193-25-00000x\"")
+    set(expect_failure TRUE)
+elseif(TEST_CASE STREQUAL "bad_document")
+    string(JSON selection SET "${selection}" filings 0 primaryDocument "\"../annual-2025.htm\"")
+    set(expect_failure TRUE)
+elseif(TEST_CASE STREQUAL "duplicate")
+    string(JSON selection SET "${selection}" filings 1 accessionNumber "\"0000320193-25-000001\"")
+    set(expect_failure TRUE)
+elseif(TEST_CASE STREQUAL "count_mismatch")
+    string(JSON selection SET "${selection}" found 2)
+    set(expect_failure TRUE)
+elseif(TEST_CASE STREQUAL "missing_metadata")
+    string(JSON selection REMOVE "${selection}" filings 0 reportDate)
+    set(expect_failure TRUE)
+elseif(TEST_CASE STREQUAL "malformed")
+    set(selection "{")
+    set(expect_failure TRUE)
+elseif(TEST_CASE STREQUAL "missing_identity")
+    set(dry_run)
+    set(expect_failure TRUE)
+elseif(TEST_CASE STREQUAL "existing_output" OR TEST_CASE STREQUAL "existing_staging"
+       OR TEST_CASE STREQUAL "transfer_failure")
+    set(dry_run)
+    set(identity_environment "SEC_USER_AGENT=FinAgentOfflineTest tests@example.invalid")
+    set(expect_failure TRUE)
+elseif(TEST_CASE STREQUAL "missing_file" OR TEST_CASE STREQUAL "usage")
+    set(expect_failure TRUE)
+elseif(NOT TEST_CASE STREQUAL "plan")
+    message(FATAL_ERROR "Unknown downloader test case: ${TEST_CASE}")
+endif()
+
+file(MAKE_DIRECTORY "${TEST_DIRECTORY}")
+set(input_file "${TEST_DIRECTORY}/selected.json")
+set(output_directory "${TEST_DIRECTORY}/reports")
+file(REMOVE_RECURSE "${output_directory}" "${output_directory}.part")
+if(TEST_CASE STREQUAL "missing_file")
+    file(REMOVE "${input_file}")
+else()
+    file(WRITE "${input_file}" "${selection}")
+endif()
+
+if(TEST_CASE STREQUAL "existing_output")
+    set(existing_directory "${output_directory}")
+elseif(TEST_CASE STREQUAL "existing_staging")
+    set(existing_directory "${output_directory}.part")
+endif()
+if(DEFINED existing_directory)
+    file(MAKE_DIRECTORY "${existing_directory}")
+    file(WRITE "${existing_directory}/keep.txt" "existing data")
+endif()
+
+set(downloader_arguments "${input_file}" "${cik}" "${output_directory}" ${dry_run})
+if(TEST_CASE STREQUAL "usage")
+    set(downloader_arguments)
+endif()
+
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E env "${identity_environment}"
+        "https_proxy=http://127.0.0.1:1" "NO_PROXY=" "no_proxy="
+        "${FILING_DOWNLOADER_EXECUTABLE}" ${downloader_arguments}
+    RESULT_VARIABLE exit_code
+    OUTPUT_VARIABLE standard_output
+    ERROR_VARIABLE error_output
+    TIMEOUT 5
+)
+
+if(expect_failure)
+    if(NOT exit_code STREQUAL "1" OR NOT standard_output STREQUAL "" OR error_output STREQUAL "")
+        message(FATAL_ERROR "Invalid downloads must fail without a success manifest: ${exit_code}. ${error_output}")
+    endif()
+    if(DEFINED existing_directory)
+        file(READ "${existing_directory}/keep.txt" existing_content)
+        if(NOT existing_content STREQUAL "existing data")
+            message(FATAL_ERROR "Existing output must not be changed.")
+        endif()
+        if(TEST_CASE STREQUAL "existing_output" AND EXISTS "${output_directory}.part")
+            message(FATAL_ERROR "Existing output must be rejected before creating staging files.")
+        endif()
+        if(TEST_CASE STREQUAL "existing_staging" AND EXISTS "${output_directory}")
+            message(FATAL_ERROR "An existing staging directory must not create final output.")
+        endif()
+    elseif(EXISTS "${output_directory}" OR EXISTS "${output_directory}.part")
+        message(FATAL_ERROR "Failed downloads must not leave output or staging directories.")
+    endif()
+    return()
+endif()
+
+if(NOT exit_code STREQUAL "0")
+    message(FATAL_ERROR "Expected a successful offline plan: ${exit_code}. ${error_output}")
+endif()
+if(EXISTS "${output_directory}" OR EXISTS "${output_directory}.part")
+    message(FATAL_ERROR "Dry-run must not create output files or directories.")
+endif()
+
+string(JSON cik GET "${standard_output}" cik)
+string(JSON filing_count LENGTH "${standard_output}" filings)
+string(JSON downloaded GET "${standard_output}" downloaded)
+string(JSON source_url GET "${standard_output}" filings 0 sourceUrl)
+string(JSON local_path GET "${standard_output}" filings 0 localPath)
+string(JSON complete GET "${standard_output}" selectionComplete)
+string(JSON dry_run GET "${standard_output}" dryRun)
+if(NOT cik STREQUAL "320193" OR NOT filing_count EQUAL expected_count OR NOT downloaded EQUAL 0 OR NOT dry_run)
+    message(FATAL_ERROR "Incorrect CIK or planned filing count: ${standard_output}")
+endif()
+if(expected_count LESS 3)
+    if(complete OR error_output STREQUAL "")
+        message(FATAL_ERROR "Partial selections must retain their incomplete status and produce a warning.")
+    endif()
+elseif(NOT complete OR NOT error_output STREQUAL "")
+    message(FATAL_ERROR "Complete selections must not produce warnings: ${error_output}")
+endif()
+if(NOT source_url STREQUAL "https://www.sec.gov/Archives/edgar/data/320193/000032019325000001/annual-2025.htm")
+    message(FATAL_ERROR "Incorrect SEC archive URL: ${source_url}")
+endif()
+if(NOT local_path STREQUAL "0000320193-25-000001/annual-2025.htm")
+    message(FATAL_ERROR "Incorrect report path: ${local_path}")
+endif()

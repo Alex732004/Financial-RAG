@@ -5,6 +5,7 @@ project(FinAgentRAG VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(CURL REQUIRED)
+find_package(Threads REQUIRED)
 
 find_package(nlohmann_json 3.12 QUIET)
 if(NOT nlohmann_json_FOUND)
@@ -28,12 +29,19 @@ target_compile_features(filing_parser PRIVATE cxx_std_20)
 set_target_properties(filing_parser PROPERTIES CXX_EXTENSIONS OFF)
 target_link_libraries(filing_parser PRIVATE nlohmann_json::nlohmann_json)
 
+add_executable(filing_downloader src/filing_downloader.cpp)
+target_compile_features(filing_downloader PRIVATE cxx_std_20)
+set_target_properties(filing_downloader PROPERTIES CXX_EXTENSIONS OFF)
+target_link_libraries(filing_downloader PRIVATE CURL::libcurl nlohmann_json::nlohmann_json Threads::Threads)
+
 if(MSVC)
     target_compile_options(sec_filings PRIVATE /W4)
     target_compile_options(filing_parser PRIVATE /W4)
+    target_compile_options(filing_downloader PRIVATE /W4)
 else()
     target_compile_options(sec_filings PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(filing_parser PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(filing_downloader PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 include(CTest)
@@ -60,6 +68,21 @@ if(BUILD_TESTING)
                 "-DTEST_CASE=${parser_case}"
                 "-DTEST_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/parser-tests/${parser_case}"
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_filing_parser.cmake"
+        )
+    endforeach()
+
+    foreach(downloader_case IN ITEMS
+        plan partial empty bad_cik bad_accession bad_document duplicate
+        count_mismatch missing_metadata malformed missing_file missing_identity
+        existing_output existing_staging transfer_failure usage
+    )
+        add_test(
+            NAME filing_downloader_${downloader_case}
+            COMMAND "${CMAKE_COMMAND}"
+                "-DFILING_DOWNLOADER_EXECUTABLE=$<TARGET_FILE:filing_downloader>"
+                "-DTEST_CASE=${downloader_case}"
+                "-DTEST_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/downloader-tests/${downloader_case}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_filing_downloader.cmake"
         )
     endforeach()
 endif()
