@@ -39,6 +39,9 @@ export SEC_USER_AGENT='FinAgentRAG YourName your-contact-email@example.com'
 ./build/sec_filings > data/raw/apple_submissions.json
 ```
 
+The client currently supports only Apple (CIK `0000320193`). It does not yet
+accept a ticker argument or select individual 10-K filings.
+
 The response goes to standard output; the command redirects it into the raw-data
 directory. Errors go to standard error. Only use the output if the command exits
 successfully: a failed request can leave an empty or partial file.
