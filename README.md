@@ -5,6 +5,7 @@ SEC submissions metadata and select up to three recent 10-K filings from saved
 metadata. They do not yet download report HTML, parse tables, or run retrieval
 or an agent.
 
+
 ## Prerequisites
 
 - A C++20 compiler.
