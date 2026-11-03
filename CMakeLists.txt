@@ -6,6 +6,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(CURL REQUIRED)
 find_package(Threads REQUIRED)
+find_package(LibXml2 REQUIRED)
 
 find_package(nlohmann_json 3.12 QUIET)
 if(NOT nlohmann_json_FOUND)
@@ -34,14 +35,21 @@ target_compile_features(filing_downloader PRIVATE cxx_std_20)
 set_target_properties(filing_downloader PROPERTIES CXX_EXTENSIONS OFF)
 target_link_libraries(filing_downloader PRIVATE CURL::libcurl nlohmann_json::nlohmann_json Threads::Threads)
 
+add_executable(filing_html_parser src/filing_html_parser.cpp)
+target_compile_features(filing_html_parser PRIVATE cxx_std_20)
+set_target_properties(filing_html_parser PROPERTIES CXX_EXTENSIONS OFF)
+target_link_libraries(filing_html_parser PRIVATE LibXml2::LibXml2 nlohmann_json::nlohmann_json)
+
 if(MSVC)
     target_compile_options(sec_filings PRIVATE /W4)
     target_compile_options(filing_parser PRIVATE /W4)
     target_compile_options(filing_downloader PRIVATE /W4)
+    target_compile_options(filing_html_parser PRIVATE /W4)
 else()
     target_compile_options(sec_filings PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(filing_parser PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(filing_downloader PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(filing_html_parser PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 include(CTest)
@@ -83,6 +91,21 @@ if(BUILD_TESTING)
                 "-DTEST_CASE=${downloader_case}"
                 "-DTEST_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/downloader-tests/${downloader_case}"
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_filing_downloader.cmake"
+        )
+    endforeach()
+
+    foreach(html_case IN ITEMS
+        structure inline hidden nested groups entities recovered manifest
+        manifest_mismatch manifest_duplicate manifest_missing_fields malformed_manifest
+        empty no_content missing_file bad_span usage
+    )
+        add_test(
+            NAME filing_html_parser_${html_case}
+            COMMAND "${CMAKE_COMMAND}"
+                "-DFILING_HTML_PARSER_EXECUTABLE=$<TARGET_FILE:filing_html_parser>"
+                "-DTEST_CASE=${html_case}"
+                "-DTEST_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/html-parser-tests/${html_case}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_filing_html_parser.cmake"
         )
     endforeach()
 endif()

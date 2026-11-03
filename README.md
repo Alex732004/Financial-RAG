@@ -2,8 +2,9 @@
 
 A standalone C++20 financial-research project. The tools fetch SEC submissions
 metadata, select up to three recent 10-K filings, and download their original
-HTML with a source manifest. Table parsing, retrieval, and agent orchestration
-are not implemented yet.
+HTML with a source manifest. An offline HTML parser extracts ordered text and
+tables into JSON. Chunking, retrieval, and agent orchestration are not implemented
+yet.
 
 ## Prerequisites
 
@@ -11,6 +12,8 @@ are not implemented yet.
 - CMake 3.20 or newer.
 - libcurl development headers and library. On macOS, these are available through
   the Xcode Command Line Tools.
+- libxml2 development headers and library for HTML parsing. These are also
+  available through the macOS Xcode Command Line Tools.
 - nlohmann/json 3.12 or newer. If it is not installed, CMake fetches version
   3.12.0; this requires Git and internet access during the initial configuration.
 - Internet access and a real contact identity for live SEC requests. No SEC API
@@ -107,6 +110,45 @@ existing output and staging directories are never overwritten. An incomplete
 input selection still downloads its available reports but retains
 `selectionComplete: false` in the manifest and prints a warning.
 
+### 6. Parse the filing HTML
+
+Run the parser on an actual downloaded report, replacing the example path with
+its real accession number and filename:
+
+```sh
+./build/filing_html_parser data/raw/apple_10ks/ACCESSION/DOCUMENT.htm > data/processed/apple_filing.json
+```
+
+Pass the download manifest as a second argument to attach company and filing
+provenance to the parsed output:
+
+```sh
+./build/filing_html_parser data/raw/apple_10ks/ACCESSION/DOCUMENT.htm data/raw/apple_10ks/manifest.json > data/processed/apple_filing.json
+```
+
+Both forms run offline. The output contains `source` metadata and ordered
+`blocks`. Blocks have document-local IDs and XPath locations in libxml2's parsed
+DOM. Heading blocks recognize `h1` through `h6`; paragraph blocks preserve inline
+text and normalize whitespace without converting financial numbers.
+
+Table blocks retain captions, rows, empty cells, header-cell flags, and explicit
+`rowspan` and `colspan` values. Row-group paths preserve the meaning of
+`rowspan="0"`. Nested tables remain attached to their containing cells instead of
+being mixed into outer rows. Year labels and unit text remain in their original
+cells or neighboring text blocks; they are not inferred or converted.
+
+With a manifest, the parser matches the HTML path to exactly one `localPath`
+relative to the manifest directory, then attaches the CIK, accession number,
+filing dates, and SEC source URL. Missing, mismatched, or duplicate entries fail
+with an error and no JSON output.
+
+The parser drops scripts, styles, hidden attributes, inline hidden styles, and
+inline-XBRL hidden sections. It does not evaluate stylesheets, execute JavaScript,
+infer headings from CSS, or reproduce a browser layout. libxml2 recovers common
+HTML errors, so XPath locations refer to the recovered DOM, not source-file line
+numbers. No external resources are fetched. Original HTML remains unchanged for
+later inspection and citations.
+
 ## Verification
 
 Run the offline checks after building:
@@ -115,21 +157,23 @@ Run the offline checks after building:
 ctest --test-dir build --output-on-failure
 ```
 
-Expected result: 28 passing tests. They cover SEC identities, filing selection,
-URL construction, unsafe or malformed metadata, partial datasets, overwrite
-protection, and cleanup after failed transfers. Tests use synthetic data and a
-blocked local proxy for transfer failures; they do not contact the SEC.
+Expected result: 45 passing tests. They cover SEC identities, filing selection,
+downloads, ordered HTML extraction, table spans and nesting, visibility, source
+manifests, and invalid input. Tests use synthetic data and a blocked local proxy
+for transfer failures; they do not contact the SEC.
 
 Live SEC access is a separate check requiring your real contact identity. The
 metadata client saves submissions JSON; the document downloader saves the annual
 report HTML. Offline tests do not verify live SEC availability or successful
-real-report downloads.
+real-report downloads. Inspect the parser's output against a real filing before
+using it for retrieval or financial calculations.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 | --- | --- |
 | CMake cannot find CURL | Install the libcurl development headers and library, then rerun configuration. |
+| CMake cannot find LibXml2 | Install the libxml2 development headers and library, then rerun configuration. |
 | The client asks for SEC_USER_AGENT | Export the variable in the same terminal used to run the client. |
 | The SEC returns HTTP 403 or 429 | Check the contact identity and SEC access policy. Avoid repeatedly retrying blocked or rate-limited requests. |
 | The document downloader rejects existing output | Choose a new output directory. Review leftover staging data before removing it yourself. |
@@ -138,13 +182,16 @@ real-report downloads.
 
 Collect and inspect three 10-K HTML reports each for Apple and Tesla. Extend the
 metadata client to Tesla and follow older submissions files when necessary to
-complete the selections. Then build structure-preserving HTML parsing and chunking.
+complete the selections. Verify the parsed tables against those reports, then
+build structure-preserving chunking over the JSON blocks.
 
 ## See Also
 
 - [src/main.cpp](src/main.cpp): the initial SEC metadata client.
 - [src/filing_parser.cpp](src/filing_parser.cpp): the offline 10-K metadata selector.
 - [src/filing_downloader.cpp](src/filing_downloader.cpp): the original HTML downloader and source manifest writer.
+- [src/filing_html_parser.cpp](src/filing_html_parser.cpp): ordered HTML text, tables, and source metadata.
 - [CMakeLists.txt](CMakeLists.txt): build and test configuration.
 - [tests/check_identity.cmake](tests/check_identity.cmake): offline identity checks.
 - [tests/check_filing_parser.cmake](tests/check_filing_parser.cmake): synthetic parser checks.
+- [tests/check_filing_html_parser.cmake](tests/check_filing_html_parser.cmake): synthetic HTML and provenance checks.
