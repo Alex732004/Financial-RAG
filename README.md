@@ -6,7 +6,6 @@ HTML with a source manifest. An offline HTML parser extracts ordered text and
 tables into JSON. Chunking, retrieval, and agent orchestration are not implemented
 yet.
 
-
 ## Prerequisites
 
 - A C++20 compiler.
