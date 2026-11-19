@@ -13,7 +13,6 @@
 #include <string>
 #include <thread>
 
-
 namespace {
 
 class CurlRuntime {
