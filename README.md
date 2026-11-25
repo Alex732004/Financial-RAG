@@ -8,7 +8,6 @@ yet.
 
 ## Prerequisites
 
-
 - A C++20 compiler.
 - CMake 3.20 or newer.
 - libcurl development headers and library. On macOS, these are available through
